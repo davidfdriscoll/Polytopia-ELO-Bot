@@ -563,7 +563,7 @@ class games(commands.Cog):
                 ax.spines['right'].set_visible(False)
                 ax.spines['left'].set_visible(False)
 
-                plt.savefig('graph.png', transparent=True)
+                plt.savefig('graph.png', transparent=False)
                 plt.close(fig)
 
                 embed.set_image(url=f'attachment://graph.png')
