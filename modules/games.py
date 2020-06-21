@@ -19,7 +19,7 @@ elo_logger = logging.getLogger('polybot.elo')
 
 
 class PolyGame(commands.Converter):
-    async def convert(self, ctx, game_id, allow_cross_guild=False):
+    async def convert(self, ctx, game_id):
 
         utilities.connect()
         try:
@@ -32,7 +32,7 @@ class PolyGame(commands.Converter):
             raise commands.UserInputError()
         else:
             logger.debug(f'Game with ID {game_id} found.')
-            if game.guild_id != ctx.guild.id and not allow_cross_guild:
+            if game.guild_id != ctx.guild.id:
                 logger.warn('Game does not belong to same guild')
                 try:
                     server_name = settings.guild_setting(guild_id=game.guild_id, setting_name='display_name')
@@ -549,7 +549,7 @@ class games(commands.Cog):
                     server_name = settings.guild_setting(guild_id=player.guild_id, setting_name='display_name')
                 except exceptions.CheckFailedError:
                     server_name = settings.guild_setting(guild_id=None, setting_name='display_name')
-
+                
                 plt.switch_backend('Agg')
 
                 fig, ax = plt.subplots()
@@ -563,7 +563,7 @@ class games(commands.Cog):
                 ax.spines['right'].set_visible(False)
                 ax.spines['left'].set_visible(False)
 
-                plt.savefig('graph.png', transparent=True)
+                plt.savefig('graph.png', transparent=False)
                 plt.close(fig)
 
                 embed.set_image(url=f'attachment://graph.png')
@@ -956,7 +956,8 @@ class games(commands.Cog):
             return await ctx.invoke(self.bot.get_command('allgames'), args=game_search)
 
         # Converting manually here to handle case of user passing a game name so info can be redirected to games() command
-        game = await PolyGame().convert(ctx, game_search)
+        game_converter = PolyGame()
+        game = await game_converter.convert(ctx, game_search)
 
         embed, content = game.embed(guild=ctx.guild, prefix=ctx.prefix)
         return await ctx.send(embed=embed, content=content)
@@ -1267,9 +1268,9 @@ class games(commands.Cog):
             return await ctx.send(f'No matching game was found.')
 
         if game.is_pending:
-            return await ctx.send(f'Game {game.id} is marked as *pending / not started*. This command cannot be used.')
+                return await ctx.send(f'Game {game.id} is marked as *pending / not started*. This command cannot be used.')
         if not game.is_completed:
-            return await ctx.send(f'Game {game.id} is marked as *Incomplete*. This command cannot be used.')
+                return await ctx.send(f'Game {game.id} is marked as *Incomplete*. This command cannot be used.')
 
         if settings.is_staff(ctx):
             # Staff usage: reset any game to Incomplete state
@@ -1384,44 +1385,18 @@ class games(commands.Cog):
             logger.warn('Game deleted while in game-related channel')
             await self.bot.loop.run_in_executor(None, game.delete_game)
 
-    @commands.command(usage='game_id "New Name"')
-    async def rename(self, ctx, *args):
+    @settings.in_bot_channel()
+    @commands.command(aliases=['namegame', 'gamename'], usage='game_id "New Name"')
+    async def rename(self, ctx, game: PolyGame = None, *args):
         """Renames an existing game (due to restarts)
 
-        You can rename a game for which you are the host. You can omit the game ID if you use the command in a game-specific channel.
+        You can rename a game for which you are the host
         **Example:**
         `[p]rename 25 Mountains of Fire`
         """
 
-        usage = (f'**Example usage:** `{ctx.prefix}rename 100 New Game Name`\n'
-                    'You can also omit the game ID if you use the command from a game-specific channel.')
-        if not args:
-            return await ctx.send(usage)
-        try:
-            game_id = int(args[0])
-            new_game_name = ' '.join(args[1:])
-        except ValueError:
-            game_id = None
-            new_game_name = ' '.join(args)
-
-        inferred_game = None
-        try:
-            inferred_game = Game.by_channel_id(chan_id=ctx.message.channel.id)
-        except exceptions.TooManyMatches:
-            logger.error(f'More than one game with matching channel {ctx.message.channel.id}')
-            return await ctx.send('Error looking up game based on current channel - please contact the bot owner.')
-        except exceptions.NoMatches:
-            if game_id:
-                game = await PolyGame().convert(ctx, int(game_id), allow_cross_guild=False)
-                if ctx.channel.id not in settings.guild_setting(ctx.guild.id, 'bot_channels'):
-                    return await ctx.send(f'This command must be used in a bot spam channel or in a game-specific channel.')
-            else:
-                ctx.command.reset_cooldown(ctx)
-                return await ctx.send(f'Game ID was not included and this does not appear to be a game-specific channel.\n{usage}')
-        else:
-            game = inferred_game
-            logger.debug(f'Inferring game {inferred_game.id} from rename command used in channel {ctx.message.channel.id}')
-
+        if not game and not args:
+            return await ctx.send(f'Game ID not provided. Usage: __`{ctx.prefix}rename GAME_ID New Name`__')
         if game.is_pending:
             return await ctx.send(f'This game has not started yet.')
 
@@ -1430,6 +1405,7 @@ class games(commands.Cog):
             # host_name = f' **{host.name}**' if host else ''
             return await ctx.send(f'Only the game creator **{game.creating_player().name}** or server staff can do this.')
 
+        new_game_name = ' '.join(args)
         if new_game_name and not utilities.is_valid_poly_gamename(input=new_game_name):
             if settings.get_user_level(ctx) <= 2:
                 return await ctx.send('That name looks made up. :thinking: You need to manually create the game __in Polytopia__, come back and input the name of the new game you made.\n'
@@ -1630,7 +1606,7 @@ async def post_win_messaging(guild, prefix, current_chan, winning_game):
     embed, content = winning_game.embed(guild=guild, prefix=prefix)
 
     for l in winning_game.lineup:
-        await achievements.set_experience_role(l.player.discord_member)
+                await achievements.set_experience_role(l.player.discord_member)
 
     if settings.guild_setting(guild.id, 'game_announce_channel') is not None:
         channel = guild.get_channel(settings.guild_setting(guild.id, 'game_announce_channel'))
@@ -1643,14 +1619,14 @@ async def post_win_messaging(guild, prefix, current_chan, winning_game):
     await current_chan.send(embed=embed, content=content)
 
 
-async def post_unwin_messaging(guild, prefix, current_chan, game, previously_confirmed: bool = False):
+async def post_unwin_messaging(guild, prefix, current_chan, game, previously_confirmed: bool=False):
 
     await game.update_squad_channels(guild_list=settings.bot.guilds, guild_id=guild.id, message=f'The game has reset to *Incomplete* status.')
     player_mentions = [f'<@{l.player.discord_member.discord_id}>' for l in game.lineup]
 
     if previously_confirmed:
         for l in game.lineup:
-            await achievements.set_experience_role(l.player.discord_member)
+                    await achievements.set_experience_role(l.player.discord_member)
 
     await current_chan.send(f'Game reset to *Incomplete*. Previously claimed win has been canceled.  Notifying game roster: {" ".join(player_mentions)}')
 
